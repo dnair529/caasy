@@ -17,8 +17,8 @@ set -euo pipefail
 CONFIG_FILE="${HOME}/.config/caasy/config.env"
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
-CAASY_HOST="${CAASY_HOST:-dnair529@dnair.us}"
-CAASY_ROOT="${CAASY_ROOT:-/var/www/dnairus/caasy}"
+CAASY_HOST="${CAASY_HOST:-deploy@31.220.58.103}"
+CAASY_ROOT="${CAASY_ROOT:-/var/www/dnair.us/caasy}"
 CAASY_URL="${CAASY_URL:-https://dnair.us/caasy}"
 CAASY_TOKEN="${CAASY_TOKEN:-}"
 CAASY_API="${CAASY_API:-${CAASY_URL}/upload.php}"
@@ -41,31 +41,32 @@ case "$cmd" in
     echo "→ caasy: pushing '$src' to ${CAASY_URL}/$sub"
     ssh "$CAASY_HOST" "mkdir -p '$dest'"
     if [ -d "$src" ]; then
-      # Trailing slash on src: copy contents into dest/name
-      rsync -avz --delete "$src" "$CAASY_HOST:$dest$name/"
+      # rsync the folder's CONTENTS into dest (so push ./site -> /caasy/sub/index.html)
+      rsync -avz "$src/" "$CAASY_HOST:$dest/"
     else
       rsync -avz "$src" "$CAASY_HOST:$dest"
     fi
-    echo "✓ live at ${CAASY_URL}/$sub${sub:+/}$name"
+    echo "✓ live at ${CAASY_URL}/$sub${sub:+/}${name}"
     ;;
 
   send)
     src="${1:?usage: caasy send <file-or-folder> [remote-subpath]}"; sub="${2:-}"
     [ -e "$src" ] || { echo "caasy: no such path: $src" >&2; exit 1; }
     [ -n "$CAASY_TOKEN" ] || { echo "caasy: set CAASY_TOKEN (for $CAASY_API)" >&2; exit 1; }
-    dest="${sub%/}/"
+    dest="${sub%/}"
     push_files() {
       for f in "$@"; do
         rel="${f#$src}"; rel="${rel#/}"
-        echo "→ sending $f → /$dest$rel"
+        target="$dest${rel:+/$rel}"
+        echo "→ sending $f → /$target"
         curl -sS -f -X POST "$CAASY_API" \
           -H "Authorization: Bearer $CAASY_TOKEN" \
-          -F "subpath=$dest$rel" \
+          -F "subpath=$target" \
           -F "file=@$f" > /dev/null || { echo "✗ upload failed: $f" >&2; exit 1; }
       done
     }
     if [ -d "$src" ]; then
-      push_files "$src" $(cd "$src" && find . -type f | sed 's|^\./||' | sed "s|^|$src/|")
+      while IFS= read -r f; do push_files "$src/$f" < /dev/null; done < <(cd "$src" && find . -type f | sed 's|^\./||')
     else
       push_files "$src"
     fi

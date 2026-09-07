@@ -52,6 +52,14 @@ $base = __DIR__;
 // Re-verify token-protected dir is not the upload script itself
 $target = $base . '/' . $subpath;
 $realBase = realpath($base);
+
+// Create missing parent dirs FIRST (realpath fails on non-existent paths)
+$dir = dirname($target);
+if (!is_dir($dir) && !mkdir($dir, 0775, true)) {
+    fail(500, 'Could not create directory');
+}
+
+// Now that dirs exist, re-verify the resolved path stays inside the base
 $realParent = realpath(dirname($target));
 if ($realParent === false || !str_starts_with($realParent, $realBase)) {
     fail(400, 'Invalid subpath');
@@ -61,10 +69,6 @@ if (basename($target) === 'upload.php' || basename($target) === '.htaccess') {
 }
 
 // --- Write ---------------------------------------------------------------
-$dir = dirname($target);
-if (!is_dir($dir) && !mkdir($dir, 0755, true)) {
-    fail(500, 'Could not create directory');
-}
 if (!move_uploaded_file($_FILES['file']['tmp_name'], $target)) {
     fail(500, 'Write failed');
 }
