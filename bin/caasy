@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# caasy — push files/folders to https://dnair.us/caasy/
+#
+# Usage:
+#   ./bin/caasy push <file-or-folder> [remote-subpath]   # via rsync over SSH (needs SSH key)
+#   ./bin/caasy send <file-or-folder> [remote-subpath]   # via HTTPS upload API (needs CAASY_TOKEN)
+#   ./bin/caasy list                                     # list what's live at /caasy/
+#   ./bin/caasy url <remote-path>                        # print the public URL for a path
+#
+# Config via environment or a config file at ~/.config/caasy/config.env:
+#   CAASY_HOST=user@dnair.us        # SSH target (user defaults to your VPS user)
+#   CAASY_ROOT=/var/www/dnairus/caasy  # on-server document root for this section
+#   CAASY_URL=https://dnair.us/caasy
+#   CAASY_TOKEN=<upload token>      # for `send`; must match server/upload.php
+set -euo pipefail
+
+CONFIG_FILE="${HOME}/.config/caasy/config.env"
+[ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+
+CAASY_HOST="${CAASY_HOST:-dnair529@dnair.us}"
+CAASY_ROOT="${CAASY_ROOT:-/var/www/dnairus/caasy}"
+CAASY_URL="${CAASY_URL:-https://dnair.us/caasy}"
+CAASY_TOKEN="${CAASY_TOKEN:-}"
+CAASY_API="${CAASY_API:-${CAASY_URL}/upload.php}"
+
+cmd="${1:-help}"; shift || true
+
+usage() {
+  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+}
+
+[ "$cmd" = "help" ] && usage
+
+case "$cmd" in
+  push)
+    src="${1:?usage: caasy push <file-or-folder> [remote-subpath]}"; sub="${2:-}"
+    [ -e "$src" ] || { echo "caasy: no such path: $src" >&2; exit 1; }
+    name="$(basename "$src")"
+    dest="${CAASY_ROOT%/}/${sub:+$sub/}"
+    echo "→ caasy: pushing '$src' to ${CAASY_URL}/$sub"
+    ssh "$CAASY_HOST" "mkdir -p '$dest'"
+    if [ -d "$src" ]; then
+      # Trailing slash on src: copy contents into dest/name
+      rsync -avz --delete "$src" "$CAASY_HOST:$dest$name/"
+    else
+      rsync -avz "$src" "$CAASY_HOST:$dest"
+    fi
+    echo "✓ live at ${CAASY_URL}/$sub${sub:+/}$name"
+    ;;
+
+  send)
+    src="${1:?usage: caasy send <file-or-folder> [remote-subpath]}"; sub="${2:-}"
+    [ -e "$src" ] || { echo "caasy: no such path: $src" >&2; exit 1; }
+    [ -n "$CAASY_TOKEN" ] || { echo "caasy: set CAASY_TOKEN (for $CAASY_API)" >&2; exit 1; }
+    dest="${sub%/}/"
+    push_files() {
+      for f in "$@"; do
+        rel="${f#$src}"; rel="${rel#/}"
+        echo "→ sending $f → /$dest$rel"
+        curl -sS -f -X POST "$CAASY_API" \
+          -H "Authorization: Bearer $CAASY_TOKEN" \
+          -F "subpath=$dest$rel" \
+          -F "file=@$f" > /dev/null || { echo "✗ upload failed: $f" >&2; exit 1; }
+      done
+    }
+    if [ -d "$src" ]; then
+      push_files "$src" $(cd "$src" && find . -type f | sed 's|^\./||' | sed "s|^|$src/|")
+    else
+      push_files "$src"
+    fi
+    echo "✓ live at ${CAASY_URL}/$dest"
+    ;;
+
+  list)
+    ssh "$CAASY_HOST" "ls -la '$CAASY_ROOT'"
+    ;;
+
+  url)
+    [ "${1:-}" ] || usage
+    echo "${CAASY_URL%/}/$1"
+    ;;
+
+  *)
+    usage
+    ;;
+esac

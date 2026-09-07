@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>caasy — Agent Web Drop</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: #0b0f14; color: #d7dde5; margin: 0; }
+  header { padding: 2rem 2rem 1rem; border-bottom: 1px solid #1d2630; }
+  h1 { margin: 0; font-size: 1.4rem; } h1 span { color: #4da3ff; }
+  p.sub { margin: .4rem 0 0; color: #7a8694; }
+  main { padding: 2rem; max-width: 860px; margin: 0 auto; }
+  .drop { border: 2px dashed #2a3644; border-radius: 12px; padding: 3rem 2rem; text-align: center; transition: border-color .2s, background .2s; }
+  .drop.over { border-color: #4da3ff; background: #101822; }
+  .drop input { display: none; }
+  .drop label { color: #4da3ff; cursor: pointer; }
+  #log { margin-top: 1.5rem; font-family: ui-monospace, monospace; font-size: .85rem; white-space: pre-wrap; }
+  .ok { color: #5ad19b; } .err { color: #ff6b6b; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>caasy</span> · agent web drop</h1>
+  <p class="sub">Drag files in to publish them under https://dnair.us/caasy/ — or push programmatically with the <code>caasy</code> CLI from your Ubuntu agent.</p>
+</header>
+<main>
+  <div class="drop" id="drop">
+    Drop files/folders here or <label for="f">browse</label>
+    <input type="file" id="f" multiple webkitdirectory>
+    <div id="log"></div>
+  </div>
+</main>
+<script>
+(function(){
+  const drop = document.getElementById('drop'), log = document.getElementById('log'), input = document.getElementById('f');
+  function line(msg, cls){ const d = document.createElement('div'); d.textContent = msg; if (cls) d.className = cls; log.appendChild(d); }
+
+  async function upload(file, relPath) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('subpath', relPath.replace(/^\/+/, ''));
+    const res = await fetch('upload.php', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('caasy_token') || prompt('caasy upload token:')) },
+      body: form
+    });
+    const j = await res.json().catch(() => ({error: 'bad json'}));
+    if (res.ok && j.ok) line('✓ ' + j.url, 'ok');
+    else line('✗ ' + relPath + ' — ' + (j.error || res.status), 'err');
+  }
+
+  async function handle(files) {
+    log.textContent = '';
+    for (const f of files) {
+      // webkitRelativePath preserves folder structure for directory drops
+      const rel = f.webkitRelativePath || f.name;
+      await upload(f, rel);
+    }
+  }
+
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handle([...e.dataTransfer.files]); });
+  input.addEventListener('change', () => handle([...input.files]));
+})();
+</script>
+</body>
+</html>
